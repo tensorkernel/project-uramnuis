@@ -1,5 +1,5 @@
 import { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { Token, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { getAssociatedTokenAddress, getAccount, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { createKeypairFromPrivateKey } from './blockchain.js';
 import { config } from '../config/index.js';
 import { createContextLogger } from '../utils/logger.js';
@@ -14,28 +14,11 @@ export class WalletManager {
   private connection: Connection;
   private keypair: Keypair;
   private walletAddress: PublicKey;
-  private solToken: Token;
-  private usdcToken: Token;
 
   constructor(connection: Connection) {
     this.connection = connection;
     this.keypair = createKeypairFromPrivateKey(config.walletPrivateKey);
     this.walletAddress = this.keypair.publicKey;
-    
-    // Initialize token objects for SOL and USDC
-    this.solToken = new Token(
-      this.connection,
-      config.solMint,
-      TOKEN_PROGRAM_ID,
-      this.keypair
-    );
-    
-    this.usdcToken = new Token(
-      this.connection,
-      config.usdcMint,
-      TOKEN_PROGRAM_ID,
-      this.keypair
-    );
   }
 
   /**
@@ -84,20 +67,22 @@ export class WalletManager {
    */
   public async getUsdcBalance(): Promise<number> {
     try {
-      // Find the associated token account for USDC
-      const tokenAccount = await this.usdcToken.getOrCreateAssociatedAccountInfo(
+      const tokenAccount = await getAssociatedTokenAddress(
+        config.usdcMint,
         this.walletAddress
       );
       
-      // Get the token amount and convert to decimal based on decimals
-      const amount = Number(tokenAccount.amount);
-      return amount / Math.pow(10, 6); // USDC has 6 decimals
+      try {
+        const accountInfo = await getAccount(this.connection, tokenAccount);
+        return Number(accountInfo.amount) / Math.pow(10, 6); // USDC has 6 decimals
+      } catch (error) {
+        if (error.name === 'TokenAccountNotFoundError') {
+          return 0;
+        }
+        throw error;
+      }
     } catch (error) {
       logger.error('Failed to get USDC balance', error);
-      // If the error is due to the account not existing, return 0 balance
-      if (error instanceof Error && error.message.includes('account not found')) {
-        return 0;
-      }
       throw error;
     }
   }
